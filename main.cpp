@@ -54,13 +54,15 @@ int main(int argc, char** argv)
     string  inputFile;
     string  outputFile;
     string  imageFormat;
+    string  tmpFileNameSuffix;
+    int     sleepTime = 0;
 
     if (!std::setlocale(LC_CTYPE, ""))
     {
         std::cerr << "Failed to set locale" << std::endl;
     }
 
-    while ((option = getopt (argc, argv, "i:o:s:t:q:c:afwhvpm")) != -1)
+    while ((option = getopt (argc, argv, "i:o:s:t:q:c:r:afwhvpm")) != -1)
     {
         switch (option)
         {
@@ -74,7 +76,7 @@ int main(int argc, char** argv)
                 outputFile = optarg;
                 break;
             case 's':
-                thumbnailSize = optarg;
+                thumbnailSize = atoi(optarg);
                 break;
             case 'f':
                 filmStripOverlay = true;
@@ -104,6 +106,9 @@ int main(int argc, char** argv)
             case 'c':
                 imageFormat = optarg;
                 break;
+            case 'r':
+                sleepTime = atoi(optarg);
+                break;
             case 'h':
                 printUsage();
                 return 0;
@@ -131,6 +136,11 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    if(outputFile != "-")
+    {
+        tmpFileNameSuffix = ".tmp";
+    }
+
     try
     {
 #ifdef ENABLE_GIO
@@ -139,8 +149,7 @@ int main(int argc, char** argv)
         ThumbnailerImageType imageType = imageFormat.empty() ? determineImageTypeFromFilename(outputFile)
                                                              : determineImageTypeFromString(imageFormat);
 
-        VideoThumbnailer videoThumbnailer(0, workaroundIssues, maintainAspectRatio, imageQuality, smartFrameSelection);
-        videoThumbnailer.setThumbnailSize(thumbnailSize);
+        VideoThumbnailer videoThumbnailer(thumbnailSize, workaroundIssues, maintainAspectRatio, imageQuality, smartFrameSelection);
         videoThumbnailer.setLogCallback([] (ThumbnailerLogLevel lvl, const std::string& msg) {
             if (lvl == ThumbnailerLogLevelInfo)
                 std::cout << msg << std::endl;
@@ -166,7 +175,18 @@ int main(int argc, char** argv)
         {
             videoThumbnailer.setSeekPercentage(seekPercentage);
         }
-        videoThumbnailer.generateThumbnail(inputFile, imageType, outputFile);
+
+        do {
+            string tmpFileName = "." + outputFile + tmpFileNameSuffix;
+            videoThumbnailer.generateThumbnail(inputFile, imageType, tmpFileName);
+            if (tmpFileNameSuffix.length() > 0)
+            {
+                rename(tmpFileName.c_str(), outputFile.c_str());
+            }
+            if(sleepTime == 0)
+                break;
+            sleep(sleepTime);
+        } while (true);
 
         delete filmStripFilter;
     }
@@ -186,26 +206,27 @@ int main(int argc, char** argv)
 
 void printVersion()
 {
-    cout << PACKAGE " version: " PACKAGE_VERSION "\n";
+    cout << PACKAGE " version: " PACKAGE_VERSION << endl;
 }
 
 void printUsage()
 {
-    cout << "Usage: " PACKAGE " [options]\n\n"
-         << "Options:\n"
-         << "  -i<s>   : input file\n"
-         << "  -o<s>   : output file\n"
-         << "  -s<n>   : thumbnail size (use 0 for original size) (default: 128)\n"
-         << "  -t<n|s> : time to seek to (percentage or absolute time hh:mm:ss) (default: 10%)\n"
-         << "  -q<n>   : image quality (0 = bad, 10 = best) (default: 8)\n"
-         << "  -c      : override image format (jpeg, png or rgb) (default: determined by filename)\n"
-         << "  -a      : ignore aspect ratio and generate square thumbnail\n"
-         << "  -f      : create a movie strip overlay\n"
-         //<< "  -p      : use smarter frame selection (slower)\n"
-         << "  -m      : prefer embedded image metadata over video content\n"
-         << "  -w      : workaround issues in old versions of ffmpeg\n"
-         << "  -v      : print version number\n"
-         << "  -h      : display this help\n";
+    cout << "Usage: " PACKAGE " [options]" << endl << endl
+         << "Options:" << endl
+         << "  -i<s>   : input file" << endl
+         << "  -o<s>   : output file" << endl
+         << "  -s<n>   : thumbnail size (use 0 for original size) (default: 128)" << endl
+         << "  -t<n|s> : time to seek to (percentage or absolute time hh:mm:ss) (default: 10%)" << endl
+         << "  -q<n>   : image quality (0 = bad, 10 = best) (default: 8)" << endl
+         << "  -c      : override image format (jpeg, png or rgb) (default: determined by filename)" << endl
+         << "  -a      : ignore aspect ratio and generate square thumbnail" << endl
+         << "  -f      : create a movie strip overlay" << endl
+         //<< "  -p      : use smarter frame selection (slower)" << endl
+         << "  -m      : prefer embedded image metadata over video content" << endl
+         << "  -w      : workaround issues in old versions of ffmpeg" << endl
+         << "  -r<n>   : repeat thumbnail generation each n seconds, n=0 means disable repetition (default: 0)" << endl
+         << "  -v      : print version number" << endl
+         << "  -h      : display this help" << endl;
 }
 
 ThumbnailerImageType determineImageTypeFromString(const std::string& type)
@@ -221,11 +242,6 @@ ThumbnailerImageType determineImageTypeFromString(const std::string& type)
     if (lowercaseType == "jpeg" || lowercaseType == "jpg")
     {
         return Jpeg;
-    }
-
-    if (lowercaseType == "raw" || lowercaseType == "rgb")
-    {
-        return Rgb;
     }
 
     throw logic_error("Invalid image type specified");
@@ -260,10 +276,10 @@ private:
 
 void tryUriConvert(std::string& filename)
 {
-    if (filename.find(":") == string::npos)
-    {
-        return;
-    }
+	if (filename.find(":") == string::npos)
+	{
+		return;
+	}
 
     LibHandle gLib("libglib-2.0.so.0");
     LibHandle gobjectLib("libgobject-2.0.so.0");
